@@ -75,4 +75,4 @@ curl -X POST -H "Content-Type: application/json" -d '{"prompt": "Who is the pres
 
 ## Limitations
 Currently, I only support request of batch size as 1.
-Since this repo is built for demostration purpose, other optimizations, such as batching and parallelism, are not included which are essential for efficiency.
+Since this repo is built for demostration purpose, other optimizations, such as batching and parallelism, are not included which are essential for efficiency.# LLM-SpecDec
