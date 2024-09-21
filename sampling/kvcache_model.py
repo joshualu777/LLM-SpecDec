@@ -47,8 +47,21 @@ class KVCacheModel():
                 print(f"last_input_id shape {last_input_id.shape}")
                 _debug_show_kvcache(self._past_key_values)
             
+            # print(f"Shape of last_input_id: {last_input_id.shape}", flush=True)
+            
+            # if self._past_key_values is None:
+            #     print("past_key_values is None")
+            # else:  
+            #     for layer_idx, (k, v) in enumerate(self._past_key_values):
+            #         if k is None or v is None:
+            #             print(f"Layer {layer_idx}: Key or Value is None")
+            #         else:
+            #             print(f"Layer {layer_idx}: Key shape {k.shape}, Value shape {v.shape}")
+
             outputs = self._model(last_input_id, past_key_values=self._past_key_values, use_cache=True)
             
+            #print("before loop")
+
             not_cached_q = outputs.logits
             if not_cached_q.dim() == 2:
                 not_cached_q = torch.unsqueeze(not_cached_q, 0)
@@ -56,7 +69,12 @@ class KVCacheModel():
             for i in range(not_cached_q.shape[-2]):   
                 not_cached_q[:, i, :] = norm_logits(not_cached_q[:, i, :], self._temperature, self._top_k, self._top_p)    
                 
+            #print(f"Shape of self._prob_history before concatenation: {self._prob_history.shape}")
+            #print(f"Shape of not_cached_q before concatenation: {not_cached_q.shape}")
+
             self._prob_history = torch.cat([self._prob_history, not_cached_q], dim=1)
+
+            #print(f"Shape of self._prob_history after concatenation: {self._prob_history.shape}")
             
             last_q = not_cached_q[:, -1, :]
             self._past_key_values = outputs.past_key_values
@@ -99,18 +117,23 @@ class KVCacheModel():
             # For example llama k, v should be (batch, num_head, seq_len, hidden_dim)
             
             # Bloom is special one
-            if isinstance(self._model, BloomForCausalLM):
-                # k (batch * head, hidden_dim, seq); v (batch * head, seq, hidden_dim)
-                k = k[:, :, :end_pos]
-                v = v[:, :end_pos, :]
-                kv_trimmed = (k, v)
-                past_key_values_trimmed.append(kv_trimmed)
-            else:
-                # k, v (batch, head, seq, hidden_dim)
-                k = k[:, :, :end_pos, :]
-                v = v[:, :, :end_pos, :]
-                kv_trimmed = (k, v)
-                past_key_values_trimmed.append(kv_trimmed)
+            # if isinstance(self._model, BloomForCausalLM):
+            #     # k (batch * head, hidden_dim, seq); v (batch * head, seq, hidden_dim)
+            #     k = k[:, :, :end_pos]
+            #     v = v[:, :end_pos, :]
+            #     kv_trimmed = (k, v)
+            #     past_key_values_trimmed.append(kv_trimmed)
+            # else:
+            #     # k, v (batch, head, seq, hidden_dim)
+            #     k = k[:, :, :end_pos, :]
+            #     v = v[:, :, :end_pos, :]
+            #     kv_trimmed = (k, v)
+            #     past_key_values_trimmed.append(kv_trimmed)
+            
+            k = k[:, :, :end_pos, :]
+            v = v[:, :, :end_pos, :]
+            kv_trimmed = (k, v)
+            past_key_values_trimmed.append(kv_trimmed)
         
         self._past_key_values = past_key_values_trimmed
         self._prob_history = self._prob_history[:, :end_pos, :]

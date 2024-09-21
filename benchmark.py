@@ -10,6 +10,9 @@ from globals import Decoder
 import json
 from  tqdm import tqdm
 
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "true"
+
 # my local models
 MODELZOO = {
     # llama-1
@@ -74,13 +77,13 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=100, g
              random_seed = None):
     # NOTE() approx_model_name and target_model_name should use the same tokenizer!
     
-    torch_device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    torch_device = 'mps' if torch.backends.mps.is_available() else 'cpu'
     
     tokenizer = AutoTokenizer.from_pretrained(approx_model_name, trust_remote_code=True)
   
     Decoder().set_tokenizer(tokenizer)
     
-    print(f"begin loading models: \n {approx_model_name} \n {target_model_name}")
+    # print(f"begin loading models: \n {approx_model_name} \n {target_model_name}")
     small_model = AutoModelForCausalLM.from_pretrained(approx_model_name, 
                                                        torch_dtype=torch.float16,
                                                        device_map="auto",
@@ -89,7 +92,7 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=100, g
                                                        torch_dtype=torch.float16,
                                                        device_map="auto",
                                                        trust_remote_code=True)
-    print("finish loading models")
+    # print("finish loading models")
     
     input_ids = tokenizer.encode(input_text, return_tensors='pt').to(torch_device)
 

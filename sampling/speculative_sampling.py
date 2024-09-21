@@ -2,6 +2,11 @@ import torch
 from tqdm import tqdm
 import torch
 
+# import editdistance
+
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "true"
+
 from sampling.kvcache_model import KVCacheModel
 from sampling.utils import norm_logits, sample, max_fn
 from globals import Decoder
@@ -142,6 +147,7 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
                 next_tok = sample(norm_logits(q[:, -1, :], 
                                   temperature, top_k, top_p))
                 x = torch.cat((x, next_tok), dim=1)
+                print(next_tok)
             
             # normalize the logits
             for i in range(q.shape[1]):
@@ -163,7 +169,10 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
                     torch.manual_seed(random_seed)
                 r = torch.rand(1, device = p.device)
                 j = x[:, prefix_len + i]
+                print("j is", j)
                 
+                print(Decoder().decode(j))
+
                 if r < torch.min(torch.tensor([1], device=q.device), p[:, prefix_len + i - 1, j] / q[:, prefix_len + i - 1, j]):
                     # accept, and update n
                     n += 1
