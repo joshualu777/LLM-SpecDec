@@ -8,6 +8,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from sampling import autoregressive_sampling, speculative_sampling, speculative_sampling_v2
 from globals import Decoder
 
+from alignment import align_token
+
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
@@ -98,39 +100,41 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ga
     top_k = 1
     top_p = 0.9
 
-    torch.manual_seed(123)
-    output = autoregressive_sampling(input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
-    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    color_print(f"large (target) model autoregressive_sampling: {generated_text}")
-    
-    if use_benchmark:
-        benchmark(autoregressive_sampling, "AS_large", use_profiling,
-                  input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
+    align_token(approx_model_name, target_model_name)
 
-    torch.manual_seed(123)
-    output = autoregressive_sampling(input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
-    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    color_print(f"small (approx) model autoregressive_sampling: {generated_text}")
+    # torch.manual_seed(123)
+    # output = autoregressive_sampling(input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
+    # generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    # color_print(f"large (target) model autoregressive_sampling: {generated_text}")
     
-    print("done done main")
+    # if use_benchmark:
+    #     benchmark(autoregressive_sampling, "AS_large", use_profiling,
+    #               input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
 
-    if use_benchmark:
-        benchmark(autoregressive_sampling, "AS_small", use_profiling,
-                  input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
+    # torch.manual_seed(123)
+    # output = autoregressive_sampling(input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
+    # generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    # color_print(f"small (approx) model autoregressive_sampling: {generated_text}")
     
-    torch.manual_seed(123)
-    output = speculative_sampling_v2(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
-    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    color_print(f"deepmind's speculative_sampling: {generated_text}")   
+    # print("done done main")
 
-    torch.manual_seed(123)
-    output = speculative_sampling(input_ids, small_model, large_model, num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed, verbose = verbose)
-    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    color_print(f"google's speculative_sampling: {generated_text}")
+    # if use_benchmark:
+    #     benchmark(autoregressive_sampling, "AS_small", use_profiling,
+    #               input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
     
-    if use_benchmark:
-        benchmark(speculative_sampling, "SP", use_profiling,
-                  input_ids, small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
+    # torch.manual_seed(123)
+    # output = speculative_sampling_v2(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
+    # generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    # color_print(f"deepmind's speculative_sampling: {generated_text}")   
+
+    # torch.manual_seed(123)
+    # output = speculative_sampling(input_ids, small_model, large_model, num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed, verbose = verbose)
+    # generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    # color_print(f"google's speculative_sampling: {generated_text}")
+    
+    # if use_benchmark:
+    #     benchmark(speculative_sampling, "SP", use_profiling,
+    #               input_ids, small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
 
 if __name__ == "__main__":
     args = parse_arguments()
