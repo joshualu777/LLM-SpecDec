@@ -10,6 +10,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "true"
 from sampling.kvcache_model import KVCacheModel
 from sampling.utils import norm_logits, sample, max_fn
 from globals import Decoder
+from alignment import TokenMapper
 
 @torch.no_grad()
 def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
@@ -109,7 +110,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
 
 
 @torch.no_grad()
-def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
+def speculative_sampling_v2(token_map : TokenMapper, prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
                          max_len : int , gamma : int = 4,
                          temperature : float = 1, top_k : int = 0, top_p : float = 0, random_seed : int = None) -> torch.Tensor:
     """
@@ -140,13 +141,21 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
         while prefix.shape[1] < T:
             # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
             x = prefix
+            skip = []
+            draft_seq = prefix
             prefix_len = prefix.shape[1]
             for _ in range(gamma):
                 # p.logits shape (batch, seq, vocab)
                 q = approx_model(x).logits
                 next_tok = sample(norm_logits(q[:, -1, :], 
                                   temperature, top_k, top_p))
-                x = torch.cat((x, next_tok), dim=1)
+                mapped_toks = token_map.get_correspond(next_tok)
+                draft_seq = torch.cat((draft_seq, next_tok), dim=1)
+                skip.append(max(1, len(mapped_toks)))
+                if len(mapped_toks) == 0:
+                    x = torch.cat((x, next_tok), dim=1)
+                for tok in mapped_toks:
+                    x = torch.cat((x, tok), dim=1)
                 print(next_tok)
             
             # normalize the logits
@@ -164,25 +173,33 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
             
             is_all_accept = True
             n = prefix_len - 1
+
+            target_index = prefix_len
             for i in range(gamma):
                 if random_seed:
                     torch.manual_seed(random_seed)
                 r = torch.rand(1, device = p.device)
-                j = x[:, prefix_len + i]
+                j = draft_seq[:, prefix_len + i]
                 print("j is", j)
                 
                 print(Decoder().decode(j))
 
-                if r < torch.min(torch.tensor([1], device=q.device), p[:, prefix_len + i - 1, j] / q[:, prefix_len + i - 1, j]):
+                prob_p = 1
+                for _ in range(skip[i]):
+                    prob_p *= p[:, prefix_len + i - 1, x[:, target_index]]
+                    target_index += 1
+
+                if r < torch.min(torch.tensor([1], device=q.device), prob_p / q[:, prefix_len + i - 1, j]): # check the math here
                     # accept, and update n
                     n += 1
                 else:
                     # reject
-                    t = sample(max_fn(p[:, n, :] - q[:, n, :]))
-                    is_all_accept = False
+                    #t = sample(max_fn(p[:, n, :] - q[:, n, :])) # problematic, the index order is not the same
+                    #is_all_accept = False
+                    is_all_accept = True
                     break
          
-            prefix = x[:, :n + 1]
+            prefix = x[:, :target_index + 1]
             
             if is_all_accept:
                 t = sample(p[:, -1, :])
@@ -192,3 +209,9 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
 
     return prefix
 
+# Sch' ool' is' fun'.
+# School' is' fun'.
+
+# Berkeley is very hot.
+
+# Find task for LLM Fusion
