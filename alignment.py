@@ -67,6 +67,7 @@
 import unicodedata
 import multiprocessing
 import json
+import os
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
@@ -86,6 +87,11 @@ class TokenMapper:
         return ''.join(char for char in normalized_text if char.isalnum())
 
     def align_token(self, draft_model_name: str, target_model_name: str):
+        if os.path.exists("mapping.json"):
+            with open("mapping.json", "r") as infile:
+                self.draft_index_mapping = json.load(infile)
+            return
+
         tokenizer_draft = AutoTokenizer.from_pretrained(draft_model_name)
         vocab = tokenizer_draft.get_vocab()
 
@@ -114,6 +120,11 @@ class TokenMapper:
             #print(token, draft_to_target[token])
             #print(index, self.draft_index_mapping[index])
         
+        json_object = json.dumps(self.draft_index_mapping, indent=4)
+        
+        with open("mapping.json", "w") as outfile:
+            outfile.write(json_object)
+
         MAX_SPLIT = 10
         statistics = {
             "exact_match": 0,

@@ -110,7 +110,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
 
 
 @torch.no_grad()
-def speculative_sampling_v2(token_map : TokenMapper, prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
+def speculative_sampling_v2(token_map : TokenMapper, draft_prefix : torch.Tensor, target_prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
                          max_len : int , gamma : int = 4,
                          temperature : float = 1, top_k : int = 0, top_p : float = 0, random_seed : int = None) -> torch.Tensor:
     """
@@ -132,38 +132,39 @@ def speculative_sampling_v2(token_map : TokenMapper, prefix : torch.Tensor, appr
     Returns:
         torch.Tensor: generated tokens (batch, target_seqlen)
     """
-    seq_len = prefix.shape[1]
+    seq_len = draft_prefix.shape[1]
     T = seq_len + max_len
     
-    assert prefix.shape[0] == 1, "input batch size must be 1"
+    assert draft_prefix.shape[0] == 1, "input batch size must be 1"
 
     with tqdm(total=T, desc="speculative sampling") as pbar:
-        while prefix.shape[1] < T:
+        while draft_prefix.shape[1] < T:
             # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
-            x = prefix
             skip = []
-            draft_seq = prefix
-            prefix_len = prefix.shape[1]
+            draft_seq = draft_prefix
+            target_seq = target_prefix
+            draft_prefix_len = draft_prefix.shape[1]
+            target_prefix_len = target_prefix.shape[1]
             for _ in range(gamma):
                 # p.logits shape (batch, seq, vocab)
-                q = approx_model(x).logits
+                q = approx_model(draft_seq).logits
                 next_tok = sample(norm_logits(q[:, -1, :], 
                                   temperature, top_k, top_p))
                 mapped_toks = token_map.get_correspond(next_tok)
                 draft_seq = torch.cat((draft_seq, next_tok), dim=1)
                 skip.append(max(1, len(mapped_toks)))
                 if len(mapped_toks) == 0:
-                    x = torch.cat((x, next_tok), dim=1)
+                    target_seq = torch.cat((target_seq, next_tok), dim=1) # TODO need better default!!!
                 for tok in mapped_toks:
-                    x = torch.cat((x, tok), dim=1)
-                print(next_tok)
+                    target_seq = torch.cat((target_seq, tok), dim=1)
+                #print(next_tok)
             
             # normalize the logits
             for i in range(q.shape[1]):
                 q[:,i,:] = norm_logits(q[:,i,:],
                                 temperature, top_k, top_p)
             # p  = M_p[prefix + x_0, x_0, .., x_(gamma-1)]
-            p = target_model(x).logits
+            p = target_model(target_seq).logits
             for i in range(p.shape[1]):
                 p[:,i,:] = norm_logits(p[:,i,:],
                                 temperature, top_k, top_p)
@@ -172,42 +173,43 @@ def speculative_sampling_v2(token_map : TokenMapper, prefix : torch.Tensor, appr
             # x = x_[:prefix_len-1] + x_0, ... x_(gamma-1)
             
             is_all_accept = True
-            n = prefix_len - 1
+            n = draft_prefix_len - 1
 
-            target_index = prefix_len
+            target_index = target_prefix_len
             for i in range(gamma):
                 if random_seed:
                     torch.manual_seed(random_seed)
                 r = torch.rand(1, device = p.device)
-                j = draft_seq[:, prefix_len + i]
-                print("j is", j)
+                j = draft_seq[:, draft_prefix_len + i]
+                #print("j is", j)
                 
-                print(Decoder().decode(j))
+                #print(Decoder().decode(j))
 
                 prob_p = 1
                 for _ in range(skip[i]):
-                    prob_p *= p[:, prefix_len + i - 1, x[:, target_index]]
+                    prob_p *= p[:, target_index - 1, target_seq[:, target_index]]
                     target_index += 1
 
-                if r < torch.min(torch.tensor([1], device=q.device), prob_p / q[:, prefix_len + i - 1, j]): # check the math here
+                if r < torch.min(torch.tensor([1], device=q.device), prob_p / q[:, draft_prefix_len + i - 1, j]): # check the math here
                     # accept, and update n
                     n += 1
                 else:
                     # reject
                     #t = sample(max_fn(p[:, n, :] - q[:, n, :])) # problematic, the index order is not the same
                     #is_all_accept = False
-                    is_all_accept = True
                     break
          
-            prefix = x[:, :target_index + 1]
+            draft_prefix = draft_seq[:, :n + 1]
+            target_prefix = target_seq[:, :target_index + 1]
             
-            if is_all_accept:
-                t = sample(p[:, -1, :])
+            # if is_all_accept:
+            #     t = sample(p[:, -1, :])
+            t = sample(q[:, -1, :])
             
-            prefix = torch.cat((prefix, t), dim=1)
+            draft_prefix = torch.cat((draft_prefix, t), dim=1)
             pbar.update(n - pbar.n)
 
-    return prefix
+    return target_prefix
 
 # Sch' ool' is' fun'.
 # School' is' fun'.

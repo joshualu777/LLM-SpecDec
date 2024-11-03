@@ -10,6 +10,7 @@ def autoregressive_sampling(x : torch.Tensor, model : torch.nn.Module, N : int,
     T = len(x) + N
 
     past_key_values = None
+    print(x)
     while n < T:
         # outputs = model(x)
         if past_key_values:
@@ -22,7 +23,10 @@ def autoregressive_sampling(x : torch.Tensor, model : torch.nn.Module, N : int,
         last_p = norm_logits(outputs.logits[::, -1, :], temperature, top_k, top_p)
         past_key_values = outputs.past_key_values
         idx_next = sample(last_p)
+        print(f"Token probabilities for next token: {last_p}")
+        print(f"Sampled token index: {idx_next}")
         x = torch.cat((x, idx_next), dim=1)
         n += 1
+    print(x)
     return x
 
