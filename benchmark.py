@@ -96,8 +96,8 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=100, g
     
     input_ids = tokenizer.encode(input_text, return_tensors='pt').to(torch_device)
 
-    top_k = 20
-    top_p = 0.9
+    top_k = 5000
+    top_p = 0
 
     torch.manual_seed(123)
     benchmark(autoregressive_sampling, "AS_large", large_model, num_tokens, top_k = top_k, top_p=top_p)
@@ -105,8 +105,11 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=100, g
     torch.manual_seed(123)
     benchmark(autoregressive_sampling, "AS_small", small_model, num_tokens, top_k = top_k, top_p=top_p)
 
+    #torch.manual_seed(123)
+    #benchmark(speculative_sampling, "SP", small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
+
     torch.manual_seed(123)
-    benchmark(speculative_sampling, "SP", small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
+    benchmark(speculative_sampling_v2, "SP", small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
 
 if __name__ == "__main__":
     args = parse_arguments()

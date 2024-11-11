@@ -38,7 +38,7 @@ def parse_arguments():
     parser.add_argument('--seed', '-s', type=int, default=None, help='set a random seed, which can makes the result reproducible')
     parser.add_argument('--benchmark', '-b', action='store_true', default=False, help='show benchmark results.')
     parser.add_argument('--profiling', '-p', action='store_true', default=False, help='collect torch profiler results.')
-    parser.add_argument('--max_tokens', '-M', type=int, default=20, help='max token number generated.')
+    parser.add_argument('--max_tokens', '-M', type=int, default=50, help='max token number generated.')
     parser.add_argument('--gamma', '-g', type=int, default=4, help='guess time.')
     args = parser.parse_args()
 
@@ -109,8 +109,8 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ga
     # outputs = small_model(input_ids)
     # print(f"Logits for simple input: {outputs.logits}")
 
-    top_k = 1
-    top_p = 0.9
+    top_k = 5000
+    top_p = 0
 
     token_map = TokenMapper(approx_model_name, target_model_name)
 
@@ -145,9 +145,9 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ga
     # generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
     # color_print(f"google's speculative_sampling: {generated_text}")
     
-    # if use_benchmark:
-    #     benchmark(speculative_sampling, "SP", use_profiling,
-    #               input_ids, small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
+    if use_benchmark:
+        benchmark(speculative_sampling_v2, "SP", use_profiling,
+                  input_ids, small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
 
 if __name__ == "__main__":
     args = parse_arguments()

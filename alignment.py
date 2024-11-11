@@ -75,32 +75,46 @@ class TokenMapper:
 
     def __init__(self, draft_name, target_name) -> None:
         self.draft_index_mapping = {}
-        self.align_token(draft_name, target_name)
+        self.tokenizer_draft = AutoTokenizer.from_pretrained(draft_name)
+        self.tokenizer_target = AutoTokenizer.from_pretrained(target_name)
+        # self.align_token()
 
     def get_correspond(self, index: int) -> list:
-        if index in self.draft_index_mapping:
-            self.draft_index_mapping[index]
+        # print(index, index.item(), self.tokenizer_draft.convert_ids_to_tokens(index.item()), self.tokenizer_draft.convert_tokens_to_string(['Ċ']))
+        draft_string = self.tokenizer_draft.convert_tokens_to_string(self.tokenizer_draft.convert_ids_to_tokens(index))
+        # print("draft string", draft_string)
+        temp = self.tokenizer_target(draft_string)["input_ids"]
+        # print(temp)
+        # print("target string", self.tokenizer_target.convert_ids_to_tokens(temp))
+        return temp
+        #draft_index = str(self.tokenizer_draft.convert_tokens_to_ids(self.normalize(draft_string)))
+        # print(draft_index)
+        # if draft_index in self.draft_index_mapping:
+        #     return self.draft_index_mapping[draft_index]
+        # return []
         return []
+    def get_reverse(self, index: int) -> list:
+        target_string = self.tokenizer_target.convert_tokens_to_string(self.tokenizer_target.convert_ids_to_tokens(index))
+        temp = self.tokenizer_draft(target_string)["input_ids"]
+        return temp
 
     def normalize(self, text: str) -> str:
         normalized_text = unicodedata.normalize('NFKD', text).lower()
         return ''.join(char for char in normalized_text if char.isalnum())
 
-    def align_token(self, draft_model_name: str, target_model_name: str):
+    def align_token(self):
         if os.path.exists("mapping.json"):
             with open("mapping.json", "r") as infile:
                 self.draft_index_mapping = json.load(infile)
             return
 
-        tokenizer_draft = AutoTokenizer.from_pretrained(draft_model_name)
-        vocab = tokenizer_draft.get_vocab()
+        vocab = self.tokenizer_draft.get_vocab()
 
         tokenizer_draft_normalized = {}
         for token, index in vocab.items():
             tokenizer_draft_normalized[self.normalize(token)] = index
         
-        tokenizer_target = AutoTokenizer.from_pretrained(target_model_name)
-        vocab = tokenizer_target.get_vocab()
+        vocab = self.tokenizer_target.get_vocab()
 
         tokenizer_target_normalized = {}
         for token, index in vocab.items():
