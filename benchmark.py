@@ -5,7 +5,7 @@ import contexttimer
 from colorama import Fore, Style
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from sampling import autoregressive_sampling, speculative_sampling, speculative_sampling_v2
+from sampling import autoregressive_sampling, speculative_sampling, speculative_sampling_v2, speculative_sampling_merging
 from globals import Decoder
 import json
 from  tqdm import tqdm
@@ -58,13 +58,43 @@ def benchmark(fn, info, *args, **kwargs):
                     for obj in data:
                         content = obj["content"]
                         # print("content", content)
-                        input_ids = Decoder().encode(content, return_tensors='pt').to('cuda')
+                        input_ids = Decoder().encode(content, return_tensors='pt').to('mps')
                         if len(input_ids[0]) > 2048 :
                             continue
                         output_ids = fn(input_ids, *args, **kwargs)
                         generated_text = Decoder().decode(output_ids)
                         # print("generated_text", generated_text)
                         total_tokens += (len(generated_text) - len(input_ids))
+                    test_sample_num -= 1
+                    if test_sample_num < 0:
+                        break
+                    
+                    pbar.update(1)
+                    
+    print(f"\n [benchmark] {info} tokens/sec: {total_tokens / t.elapsed}, {t.elapsed} sec generates {total_tokens} tokens")
+
+def benchmark_merge(fn, info, *args, **kwargs):
+
+    test_sample_num = 5
+    with contexttimer.Timer() as t:
+        total_tokens = 0
+        with open('/share_nfs/fangjiarui/root/code/datasets/share_gpt.jsonl', 'r') as file:
+            # add tqdm
+            
+            with tqdm(total=test_sample_num, desc=f"{info} benchmarking") as pbar:
+                for line in file.readlines():
+                    data = json.loads(line)
+                    for obj in data:
+                        content = obj["content"]
+                        # print("content", content)
+                        input_ids_draft = Decoder().encode_draft(content, return_tensors='pt').to('mps')
+                        input_ids_target = Decoder().encode_target(content, return_tensors='pt').to('mps')
+                        if len(input_ids_draft[0]) > 2048 or len(input_ids_target[0]) > 2048 :
+                            continue
+                        output_ids = fn(input_ids_draft, input_ids_target, *args, **kwargs)
+                        generated_text = Decoder().decode_target(output_ids)
+                        # print("generated_text", generated_text)
+                        total_tokens += (len(generated_text) - len(input_ids_target))
                     test_sample_num -= 1
                     if test_sample_num < 0:
                         break
@@ -109,7 +139,7 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=100, g
     #benchmark(speculative_sampling, "SP", small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
 
     torch.manual_seed(123)
-    benchmark(speculative_sampling_v2, "SP", small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
+    benchmark(speculative_sampling_merging, "SP", small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
 
 if __name__ == "__main__":
     args = parse_arguments()

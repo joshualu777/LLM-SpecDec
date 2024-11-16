@@ -5,7 +5,7 @@ import contexttimer
 from colorama import Fore, Style
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from sampling import autoregressive_sampling, speculative_sampling, speculative_sampling_v2
+from sampling import autoregressive_sampling, speculative_sampling, speculative_sampling_v2, speculative_sampling_merging
 from globals import Decoder
 from alignment import TokenMapper
 
@@ -82,7 +82,7 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ga
     small_tokenizer = AutoTokenizer.from_pretrained(approx_model_name, trust_remote_code=True, use_auth_token=True)
     large_tokenizer = AutoTokenizer.from_pretrained(target_model_name, trust_remote_code=True, use_auth_token=True)
   
-    #Decoder().set_tokenizer(tokenizer)
+    Decoder().set_tokenizer(small_tokenizer, large_tokenizer)
     
     print(f"begin loading models: \n {approx_model_name} \n {target_model_name}")
     small_model = AutoModelForCausalLM.from_pretrained(approx_model_name, 
@@ -119,9 +119,9 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ga
     generated_text = large_tokenizer.decode(output[0], skip_special_tokens=True)
     color_print(f"large (target) model autoregressive_sampling: {generated_text}")
     
-    if use_benchmark:
-        benchmark(autoregressive_sampling, "AS_large", use_profiling,
-                  large_input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
+    # if use_benchmark:
+    #     benchmark(autoregressive_sampling, "AS_large", use_profiling,
+    #               large_input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
 
     torch.manual_seed(123)
     output = autoregressive_sampling(small_input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
@@ -130,13 +130,13 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ga
     
     print("done done main")
 
-    if use_benchmark:
-        benchmark(autoregressive_sampling, "AS_small", use_profiling,
-                  small_input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
+    # if use_benchmark:
+    #     benchmark(autoregressive_sampling, "AS_small", use_profiling,
+    #               small_input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
     
     print("start new spec dec")
     torch.manual_seed(123)
-    output = speculative_sampling_v2(token_map, small_input_ids, large_input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
+    output = speculative_sampling_merging(token_map, small_input_ids, large_input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
     generated_text = large_tokenizer.decode(output[0], skip_special_tokens=True)
     color_print(f"deepmind's speculative_sampling: {generated_text}")   
 
@@ -146,8 +146,8 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ga
     # color_print(f"google's speculative_sampling: {generated_text}")
     
     if use_benchmark:
-        benchmark(speculative_sampling_v2, "SP", use_profiling,
-                  input_ids, small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
+        benchmark(speculative_sampling_merging, "SP", use_profiling,
+                  token_map, small_input_ids, large_input_ids, small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
 
 if __name__ == "__main__":
     args = parse_arguments()

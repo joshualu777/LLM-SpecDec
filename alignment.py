@@ -1,69 +1,3 @@
-# import unicodedata
-# from transformers import AutoTokenizer
-# from concurrent.futures import ProcessPoolExecutor, as_completed
-
-# def normalize(text: str) -> str:
-#     normalized_text = unicodedata.normalize('NFKD', text).lower()
-#     return ''.join(char for char in normalized_text if char.isalnum())
-
-# def align_token(draft_model_name: str, target_model_name: str, max_workers: int = 100):
-#     tokenizer_draft = AutoTokenizer.from_pretrained(draft_model_name)
-#     vocab_draft = tokenizer_draft.get_vocab()
-
-#     tokenizer_draft_normalized = {}
-#     for token, index in vocab_draft.items():
-#         tokenizer_draft_normalized[normalize(token)] = index
-#         print(index)
-
-#     tokenizer_target = AutoTokenizer.from_pretrained(target_model_name)
-#     vocab_target = tokenizer_target.get_vocab()
-
-#     tokenizer_target_normalized = {}
-#     for token, index in vocab_target.items():
-#         tokenizer_target_normalized[normalize(token)] = index
-
-#     draft_to_target = {}
-#     print(len(tokenizer_draft_normalized))
-
-#     # Use ProcessPoolExecutor to parallelize the get_best computation
-#     with ProcessPoolExecutor(max_workers=max_workers) as executor:
-#         future_to_token = {
-#             executor.submit(get_best, token, tokenizer_target_normalized): token
-#             for token in tokenizer_draft_normalized.keys()
-#         }
-
-#         for cnt, future in enumerate(as_completed(future_to_token)):
-#             token = future_to_token[future]
-#             try:
-#                 best_match = future.result()
-#                 draft_to_target[token] = best_match
-#                 print(cnt, token, tokenizer_draft.convert_tokens_to_ids(token), best_match)
-#             except Exception as exc:
-#                 print(f"Token {token} generated an exception: {exc}")
-
-# def get_best(cur_token: str, vocab: dict) -> list:
-#     best_score = 0
-#     best_match = []
-#     for token, index in vocab.items():
-#         cur_score = compute_score(token, cur_token)
-#         if cur_score > best_score:
-#             best_score = cur_score
-#             best_match = [token]
-
-#     if best_score > 0:
-#         index = cur_token.find(best_match[0])
-#         best_lower = get_best(cur_token[:index], vocab)
-#         best_upper = get_best(cur_token[index + len(best_match[0]):], vocab)
-#         return best_lower + best_match + best_upper
-#     return best_match
-
-# def compute_score(str1: str, str2: str) -> float:
-#     if str1 in str2:
-#         if len(str2) == 0:
-#             return 0
-#         return len(str1) / len(str2)
-#     return 0
-
 import unicodedata
 import multiprocessing
 import json
@@ -74,69 +8,63 @@ from transformers import AutoTokenizer
 class TokenMapper:
 
     def __init__(self, draft_name, target_name) -> None:
-        self.draft_index_mapping = {}
         self.tokenizer_draft = AutoTokenizer.from_pretrained(draft_name)
         self.tokenizer_target = AutoTokenizer.from_pretrained(target_name)
-        # self.align_token()
+        self.draft_tag = (draft_name + "x" + target_name).replace("/", "_")
+        self.target_tag = (target_name + "x" + draft_name).replace("/", "_")
+        self.draft_index_mapping = self.align_token(self.tokenizer_draft, self.tokenizer_target, self.draft_tag)
+        self.target_index_mapping = self.align_token(self.tokenizer_target, self.tokenizer_draft, self.target_tag)
 
     def get_correspond(self, index: int) -> list:
-        # print(index, index.item(), self.tokenizer_draft.convert_ids_to_tokens(index.item()), self.tokenizer_draft.convert_tokens_to_string(['Ċ']))
-        draft_string = self.tokenizer_draft.convert_tokens_to_string(self.tokenizer_draft.convert_ids_to_tokens(index))
-        # print("draft string", draft_string)
-        temp = self.tokenizer_target(draft_string)["input_ids"]
-        # print(temp)
-        # print("target string", self.tokenizer_target.convert_ids_to_tokens(temp))
-        return temp
-        #draft_index = str(self.tokenizer_draft.convert_tokens_to_ids(self.normalize(draft_string)))
-        # print(draft_index)
-        # if draft_index in self.draft_index_mapping:
-        #     return self.draft_index_mapping[draft_index]
-        # return []
+        index = str(index)
+        if index in self.draft_index_mapping:
+            return self.draft_index_mapping[index]
+        print("not found in draft", index)
         return []
+    
     def get_reverse(self, index: int) -> list:
-        target_string = self.tokenizer_target.convert_tokens_to_string(self.tokenizer_target.convert_ids_to_tokens(index))
-        temp = self.tokenizer_draft(target_string)["input_ids"]
-        return temp
+        index = str(index)
+        if index in self.target_index_mapping:
+            return self.target_index_mapping[index]
+        print("not found in target", index)
+        return []
 
     def normalize(self, text: str) -> str:
         normalized_text = unicodedata.normalize('NFKD', text).lower()
         return ''.join(char for char in normalized_text if char.isalnum())
 
-    def align_token(self):
-        if os.path.exists("mapping.json"):
-            with open("mapping.json", "r") as infile:
-                self.draft_index_mapping = json.load(infile)
-            return
+    def align_token(self, tokenizer_first: AutoTokenizer, tokenizer_second: AutoTokenizer, tag: str) -> dict:
+        print(tag + ".json")
+        if os.path.exists(tag + ".json"):
+            with open(tag + ".json", "r") as infile:
+                return json.load(infile)
 
-        vocab = self.tokenizer_draft.get_vocab()
+        vocab = tokenizer_first.get_vocab()
 
-        tokenizer_draft_normalized = {}
+        tokenizer_first_normalized = {}
         for token, index in vocab.items():
-            tokenizer_draft_normalized[self.normalize(token)] = index
+            tokenizer_first_normalized[tokenizer_first.convert_tokens_to_string([token])] = index
         
         vocab = self.tokenizer_target.get_vocab()
 
-        tokenizer_target_normalized = {}
+        tokenizer_second_normalized = {}
         for token, index in vocab.items():
-            tokenizer_target_normalized[self.normalize(token)] = index
+            tokenizer_second_normalized[tokenizer_second.convert_tokens_to_string([token])] = index
         
-        draft_to_target = {}
+        first_to_second = {}
 
-        for token, index in tqdm(tokenizer_draft_normalized.items(), desc="Aligning tokens", unit="token"):
-            lst = self.get_best(token, tokenizer_target_normalized)
+        for str, index in tqdm(tokenizer_first_normalized.items(), desc="Aligning tokens", unit="token"):
+            # lst = self.get_best(str, tokenizer_second_normalized)
+            lst = []
             if len(lst) == 0:
-                draft_to_target[token] = []
-                self.draft_index_mapping[index] = []
+                first_to_second[index] = tokenizer_second(str)["input_ids"]
             else:
                 word, num = zip(*lst)
-                draft_to_target[token] = list(word)
-                self.draft_index_mapping[index] = list(num)
-            #print(token, draft_to_target[token])
-            #print(index, self.draft_index_mapping[index])
+                first_to_second[index] = list(num)
         
-        json_object = json.dumps(self.draft_index_mapping, indent=4)
+        json_object = json.dumps(first_to_second, indent=4)
         
-        with open("mapping.json", "w") as outfile:
+        with open(tag + ".json", "w") as outfile:
             outfile.write(json_object)
 
         MAX_SPLIT = 10
@@ -156,7 +84,7 @@ class TokenMapper:
             }
         }
 
-        for token, lst in draft_to_target.items():
+        for index, lst in first_to_second.items():
             if len(lst) == 0:
                 statistics["no_match"] += 1
             elif len(lst) == 1:
