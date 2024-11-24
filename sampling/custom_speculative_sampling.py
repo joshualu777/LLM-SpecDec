@@ -33,16 +33,16 @@ def speculative_sampling_merging(token_map : TokenMapper, draft_prefix : torch.T
     Returns:
         torch.Tensor: generated tokens (batch, target_seqlen)
     """
-    seq_len = draft_prefix.shape[1]
+    seq_len = target_prefix.shape[1]
     T = seq_len + max_len
 
     total = 0
     accepted = 0
     
-    assert draft_prefix.shape[0] == 1, "input batch size must be 1"
+    assert target_prefix.shape[0] == 1, "input batch size must be 1"
 
     with tqdm(total=T, desc="speculative sampling") as pbar:
-        while draft_prefix.shape[1] < T:
+        while target_prefix.shape[1] < T:
             # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
             skip = []
             draft_seq = draft_prefix
@@ -65,14 +65,14 @@ def speculative_sampling_merging(token_map : TokenMapper, draft_prefix : torch.T
                     target_seq = torch.cat((target_seq, tok_tensor), dim=1)
 
             # normalize the logits
-            for i in range(q.shape[1]):
-                q[:,i,:] = norm_logits(q[:,i,:],
-                                temperature, top_k, top_p)
+            # for i in range(draft_next_normalize, q.shape[1]):
+            #     q[:,i,:] = norm_logits(q[:,i,:],
+            #                     temperature, top_k, top_p)
                 
             p = target_model(target_seq).logits
-            for i in range(p.shape[1]):
-                p[:,i,:] = norm_logits(p[:,i,:],
-                                temperature, top_k, top_p)
+            # for i in range(target_next_normalize, p.shape[1]):
+            #     p[:,i,:] = norm_logits(p[:,i,:],
+            #                     temperature, top_k, top_p)
             
             is_all_accept = True
 
@@ -83,14 +83,15 @@ def speculative_sampling_merging(token_map : TokenMapper, draft_prefix : torch.T
                     torch.manual_seed(random_seed)
                 r = torch.rand(1, device = p.device)
                 j = draft_seq[:, draft_prefix_len + i]
+                # print(j)
 
                 prob_p = 0
                 for _ in range(skip[i]):
-                    prob_p = max(prob_p, p[:, target_index - 1, target_seq[:, target_index]].item())
+                    prob_p = max(prob_p, norm_logits(p[:, target_index - 1, :], temperature, top_k, top_p)[:, target_seq[:, target_index]])
                     target_index += 1
 
 
-                if r < torch.min(torch.tensor([1], device=q.device), prob_p / q[:, draft_prefix_len + i - 1, j]):
+                if r < torch.min(torch.tensor([1], device=q.device), prob_p / norm_logits(q[:, draft_prefix_len + i - 1, :], temperature, top_k, top_p)[:, j]):
                     # accept
                     draft_index += 1
                     accepted += 1
@@ -104,7 +105,9 @@ def speculative_sampling_merging(token_map : TokenMapper, draft_prefix : torch.T
             draft_prefix = draft_seq[:, :draft_index]
             target_prefix = target_seq[:, :target_index]
 
-            t = sample(p[:, target_index - 1, :])
+            t = sample(norm_logits(p[:, target_index -1, :], 
+                                  temperature, top_k, top_p))
+            # t = sample(p[:, target_index - 1, :])
             target_prefix = torch.cat((target_prefix, t), dim=1)
 
             new_draft_tokens = token_map.get_reverse(t.item())
@@ -112,7 +115,7 @@ def speculative_sampling_merging(token_map : TokenMapper, draft_prefix : torch.T
                 tok_tensor = torch.tensor(tok).view(1, 1).to(draft_prefix.device)
                 draft_prefix = torch.cat((draft_prefix, tok_tensor), dim=1)
 
-            pbar.update(draft_index - pbar.n)
+            pbar.update(target_index - pbar.n)
 
     print("accepted:", accepted, "out of", total)
     return target_prefix

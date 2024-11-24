@@ -9,6 +9,10 @@ from sampling import autoregressive_sampling, speculative_sampling, speculative_
 from globals import Decoder
 import json
 from  tqdm import tqdm
+from alignment import TokenMapper
+from datasets import load_dataset
+from collections import defaultdict
+
 
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
@@ -46,60 +50,78 @@ def parse_arguments():
 
 def benchmark(fn, info, *args, **kwargs):
 
+    dataset = load_dataset("OpenAssistant/oasst1", split="train")
+
+    threads = defaultdict(list)
+    for message in dataset:
+        if "message_tree_id" in message:
+            threads[message["message_tree_id"]].append(message)
+
     test_sample_num = 5
     with contexttimer.Timer() as t:
         total_tokens = 0
-        with open('/share_nfs/fangjiarui/root/code/datasets/share_gpt.jsonl', 'r') as file:
-            # add tqdm
-            
-            with tqdm(total=test_sample_num, desc=f"{info} benchmarking") as pbar:
-                for line in file.readlines():
-                    data = json.loads(line)
-                    for obj in data:
-                        content = obj["content"]
-                        # print("content", content)
-                        input_ids = Decoder().encode(content, return_tensors='pt').to('mps')
-                        if len(input_ids[0]) > 2048 :
-                            continue
-                        output_ids = fn(input_ids, *args, **kwargs)
-                        generated_text = Decoder().decode(output_ids)
-                        # print("generated_text", generated_text)
-                        total_tokens += (len(generated_text) - len(input_ids))
-                    test_sample_num -= 1
-                    if test_sample_num < 0:
-                        break
-                    
-                    pbar.update(1)
+        with tqdm(total=test_sample_num, desc=f"{info} benchmarking") as pbar:
+            for tree_id, messages in list(threads.items())[:test_sample_num]:
+                # Sort messages by hierarchy (if necessary)
+                messages = sorted(messages, key=lambda x: x["parent_id"] or "")
+
+                # Reconstruct the conversation
+                content = "\n".join([msg["role"] + ": " + msg["text"] for msg in messages])
+                # print("content", content)
+                input_ids = Decoder().encode(content, return_tensors='pt').to('mps')
+                if len(input_ids[0]) > 2048 :
+                    continue
+                output_ids = fn(input_ids, *args, **kwargs)
+                generated_text = Decoder().decode(output_ids)
+                # print("generated_text", generated_text)
+                # print("end_generated_text")
+                total_tokens += (len(output_ids[0]) - len(input_ids[0]))
+                test_sample_num -= 1
+                if test_sample_num < 0:
+                    break
+                
+                pbar.update(1)
                     
     print(f"\n [benchmark] {info} tokens/sec: {total_tokens / t.elapsed}, {t.elapsed} sec generates {total_tokens} tokens")
 
-def benchmark_merge(fn, info, *args, **kwargs):
+def benchmark_merge(fn, info, mapper, *args, **kwargs):
+
+    dataset = load_dataset("OpenAssistant/oasst1", split="train")
+    print(dataset[0].keys())
+
+    # Group messages by thread_id
+    threads = defaultdict(list)
+    for message in dataset:
+        if "message_tree_id" in message:
+            threads[message["message_tree_id"]].append(message)
 
     test_sample_num = 5
     with contexttimer.Timer() as t:
         total_tokens = 0
-        with open('/share_nfs/fangjiarui/root/code/datasets/share_gpt.jsonl', 'r') as file:
-            # add tqdm
-            
-            with tqdm(total=test_sample_num, desc=f"{info} benchmarking") as pbar:
-                for line in file.readlines():
-                    data = json.loads(line)
-                    for obj in data:
-                        content = obj["content"]
-                        # print("content", content)
-                        input_ids_draft = Decoder().encode_draft(content, return_tensors='pt').to('mps')
-                        input_ids_target = Decoder().encode_target(content, return_tensors='pt').to('mps')
-                        if len(input_ids_draft[0]) > 2048 or len(input_ids_target[0]) > 2048 :
-                            continue
-                        output_ids = fn(input_ids_draft, input_ids_target, *args, **kwargs)
-                        generated_text = Decoder().decode_target(output_ids)
-                        # print("generated_text", generated_text)
-                        total_tokens += (len(generated_text) - len(input_ids_target))
-                    test_sample_num -= 1
-                    if test_sample_num < 0:
-                        break
-                    
-                    pbar.update(1)
+        with tqdm(total=test_sample_num, desc=f"{info} benchmarking") as pbar:
+            for tree_id, messages in list(threads.items())[:test_sample_num]:
+                # Sort messages by hierarchy (if necessary)
+                messages = sorted(messages, key=lambda x: x["parent_id"] or "")
+
+                # Reconstruct the conversation
+                content = "\n".join([msg["role"] + ": " + msg["text"] for msg in messages])
+                # print("content: ", content)
+                input_ids_draft = Decoder().encode_draft(content, return_tensors='pt').to('mps')
+                input_ids_target = Decoder().encode_target(content, return_tensors='pt').to('mps')
+                if len(input_ids_draft[0]) > 2048 or len(input_ids_target[0]) > 2048 :
+                    print("too long")
+                    continue
+                output_ids = fn(mapper, input_ids_draft, input_ids_target, *args, **kwargs)
+                # print(len(output_ids))
+                generated_text = Decoder().decode_target(output_ids)
+                # print("generated_text", generated_text)
+                # print("end_generated_text")
+                total_tokens += (len(output_ids[0]) - len(input_ids_target[0]))
+                test_sample_num -= 1
+                if test_sample_num < 0:
+                    break
+                
+                pbar.update(1)
                     
     print(f"\n [benchmark] {info} tokens/sec: {total_tokens / t.elapsed}, {t.elapsed} sec generates {total_tokens} tokens")
 
@@ -109,9 +131,10 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=100, g
     
     torch_device = 'mps' if torch.backends.mps.is_available() else 'cpu'
     
-    tokenizer = AutoTokenizer.from_pretrained(approx_model_name, trust_remote_code=True)
+    small_tokenizer = AutoTokenizer.from_pretrained(approx_model_name, trust_remote_code=True, use_auth_token=True)
+    large_tokenizer = AutoTokenizer.from_pretrained(target_model_name, trust_remote_code=True, use_auth_token=True)
   
-    Decoder().set_tokenizer(tokenizer)
+    Decoder().set_tokenizer(small_tokenizer, large_tokenizer)
     
     # print(f"begin loading models: \n {approx_model_name} \n {target_model_name}")
     small_model = AutoModelForCausalLM.from_pretrained(approx_model_name, 
@@ -124,10 +147,12 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=100, g
                                                        trust_remote_code=True)
     # print("finish loading models")
     
-    input_ids = tokenizer.encode(input_text, return_tensors='pt').to(torch_device)
+    input_ids = small_tokenizer.encode(input_text, return_tensors='pt').to(torch_device)
 
     top_k = 5000
     top_p = 0
+
+    token_map = TokenMapper(approx_model_name, target_model_name)
 
     torch.manual_seed(123)
     benchmark(autoregressive_sampling, "AS_large", large_model, num_tokens, top_k = top_k, top_p=top_p)
@@ -139,7 +164,7 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=100, g
     #benchmark(speculative_sampling, "SP", small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
 
     torch.manual_seed(123)
-    benchmark(speculative_sampling_merging, "SP", small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
+    benchmark_merge(speculative_sampling_merging, "SP", token_map, small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
 
 if __name__ == "__main__":
     args = parse_arguments()

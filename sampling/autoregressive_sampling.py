@@ -20,7 +20,7 @@ def autoregressive_sampling(x : torch.Tensor, model : torch.nn.Module, N : int,
         else:
             outputs = model(x)
         last_p = norm_logits(outputs.logits[::, -1, :], temperature, top_k, top_p)
-        past_key_values = outputs.past_key_values
+        # past_key_values = outputs.past_key_values
         idx_next = sample(last_p)
         x = torch.cat((x, idx_next), dim=1)
         n += 1
