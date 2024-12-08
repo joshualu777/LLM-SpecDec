@@ -5,6 +5,8 @@ import os
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
+import editdistance
+
 class TokenMapper:
 
     def __init__(self, draft_name, target_name) -> None:
@@ -13,6 +15,7 @@ class TokenMapper:
         self.draft_tag = (draft_name + "x" + target_name).replace("/", "_")
         self.target_tag = (target_name + "x" + draft_name).replace("/", "_")
         self.draft_index_mapping = self.align_token(self.tokenizer_draft, self.tokenizer_target, self.draft_tag)
+        self.draft_index_prob_map = self.align_prob(self.tokenizer_draft, self.tokenizer_target, self.draft_tag)
         self.target_index_mapping = self.align_token(self.tokenizer_target, self.tokenizer_draft, self.target_tag)
 
     def get_correspond(self, index: int) -> list:
@@ -43,7 +46,7 @@ class TokenMapper:
 
         tokenizer_first_normalized = {}
         for token, index in vocab.items():
-            tokenizer_first_normalized[tokenizer_first.convert_tokens_to_string([token])] = index
+            tokenizer_first_normalized[(token, tokenizer_first.convert_tokens_to_string([token]))] = index
         
         vocab = self.tokenizer_target.get_vocab()
 
@@ -53,14 +56,14 @@ class TokenMapper:
         
         first_to_second = {}
 
-        for str, index in tqdm(tokenizer_first_normalized.items(), desc="Aligning tokens", unit="token"):
-            # lst = self.get_best(str, tokenizer_second_normalized)
+        for (token, str_rep), index in tqdm(tokenizer_first_normalized.items(), desc="Aligning tokens", unit="token"):
+            # lst = self.get_best(str_rep, tokenizer_second_normalized)
             lst = []
             if len(lst) == 0:
-                first_to_second[index] = tokenizer_second(str)["input_ids"]
+                first_to_second[str(index)] = tokenizer_second(str_rep)["input_ids"]
             else:
                 word, num = zip(*lst)
-                first_to_second[index] = list(num)
+                first_to_second[str(index)] = list(num)
         
         json_object = json.dumps(first_to_second, indent=4)
         
@@ -99,30 +102,53 @@ class TokenMapper:
         
         with open("statistics.json", "w") as outfile:
             outfile.write(json_object)
+        
+        return first_to_second
+    
+    def align_prob(self, tokenizer_first: AutoTokenizer, tokenizer_second: AutoTokenizer, tag: str) -> dict:
+        if os.path.exists(tag + "_prob.json"):
+            with open(tag + "_prob.json", "r") as infile:
+                return json.load(infile)
 
+        vocab = tokenizer_first.get_vocab()
 
-    def get_best(self, cur_token: str, vocab: dict) -> list:
-        best_score = 0
-        best_match = []
+        tokenizer_first_normalized = {}
         for token, index in vocab.items():
-            cur_score = self.compute_score(token, cur_token)
+            tokenizer_first_normalized[(token, tokenizer_first.convert_tokens_to_string([token]))] = index
+        
+        vocab = self.tokenizer_target.get_vocab()
+
+        tokenizer_second_normalized = {}
+        for token, index in vocab.items():
+            tokenizer_second_normalized[tokenizer_second.convert_tokens_to_string([token])] = index
+        
+        first_to_second = {}
+
+        for (token, str_rep), index in tqdm(tokenizer_first_normalized.items(), desc="Aligning tokens", unit="token"):
+            best = self.get_best(str_rep, tokenizer_second_normalized, tokenizer_second)
+            first_to_second[str(index)] = best
+        
+        json_object = json.dumps(first_to_second, indent=4)
+        
+        with open(tag + "_prob.json", "w") as outfile:
+            outfile.write(json_object)
+        
+        return first_to_second
+
+
+    def get_best(self, cur_token: str, vocab: dict, tokenizer_second: AutoTokenizer) -> list:
+        best_score = 0
+        best_match = 0
+        for token, index in vocab.items():
+            cur_score = self.compute_score(tokenizer_second.convert_ids_to_tokens(index), cur_token)
             if cur_score > best_score:
                 best_score = cur_score
-                best_match = [(token, index)]
+                best_match = index
 
-        if best_score > 0:
-            index = cur_token.find(best_match[0][0])
-            best_lower = self.get_best(cur_token[:index], vocab)
-            best_upper = self.get_best(cur_token[index + len(best_match[0][0]):], vocab)
-            return best_lower + best_match + best_upper
         return best_match
 
     def compute_score(self, str1: str, str2: str) -> float:
-        if str1 in str2:
-            if len(str2) == 0:
-                return 0
-            return len(str1) / len(str2)
-        return 0
+        return editdistance.eval(str1, str2)
 
 # reawakening
 
